@@ -15,10 +15,9 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID   = os.environ.get("CHAT_ID", "")
 
 MODELS = [
-    {"query": "iPhone 13", "min_price": 100, "max_price": 150},
-    {"query": "iPhone 13 Pro", "min_price": 100, "max_price": 200},
-    {"query": "iPhone 14", "min_price": 100, "max_price": 180},
-    {"query": "iPhone 14 Pro", "min_price": 100, "max_price": 250},
+    {"query": "iPhone 13 Pro", "min_price": 250, "max_price": 420},
+    {"query": "iPhone 14 Pro", "min_price": 350, "max_price": 550},
+    {"query": "iPhone 15",     "min_price": 400, "max_price": 600},
 ]
 
 BLACKLIST_WORDS = [
@@ -31,8 +30,8 @@ BLACKLIST_WORDS = [
 PAGES = 3
 SLEEP_SECONDS = 3
 SEEN_FILE = "seen.json"
-DEBUG = False   # Jei True - parodys pirmu skelbimu kainu struktura diagnostikai
-DRY_RUN = False # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau matei.
+DEBUG = True   # Jei True - parodys pirmu skelbimu kainu struktura diagnostikai
+DRY_RUN = True # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau matei.
                # Pirmam paleidimui palik True, antram - pakeisk i False.
 
 # Kuriu saliu pardavejus LEISTI (pagal profilio nuorodos domena, pvz. vinted.lt -> "LT").
@@ -120,6 +119,44 @@ def fetch_items(query, pages):
         items.extend(batch)
         time.sleep(SLEEP_SECONDS)
     return items
+
+
+_debug_detail_printed = False
+DETAIL_SLEEP_SECONDS = 1.0
+
+
+def fetch_item_details(item_id):
+    """Katalogo/paieskos API skelbimo objekte NERA aprasymo (description visada
+    tuscias) - tai patvirtino DEBUG isvestis. Todel kandidatams, praejusiems
+    kainos filtra, papildomai uzklausiame atskiro skelbimo endpoint'o, kuriame
+    turetu buti pilnas aprasymas (ir galbut patikimesni pardavejo duomenys).
+
+    DEMESIO: sio endpoint'o tiksli forma spejama pagal iprasta Vinted API
+    struktura, nes neturiu galimybes pats jos patikrinti tiesiogiai. Jei
+    DEBUG=True, pirmam issikvietimui bus atspausdintas visas atsakymas - jei
+    endpoint'as neteisingas (pvz. gaunamas 404 ar kitokia JSON strauktura),
+    tai bus matoma is karto ir galesime endpoint'a pataisyti kartu."""
+    global _debug_detail_printed
+    url = f"{BASE}/api/v2/items/{item_id}"
+    try:
+        resp = session.get(url, headers=HEADERS, timeout=20)
+        if resp.status_code != 200:
+            if DEBUG:
+                print(f"  [DEBUG] skelbimo {item_id} detaliu uzklausa: HTTP {resp.status_code}")
+            return None
+        data = resp.json()
+        detail = data.get("item") if isinstance(data, dict) else None
+        if detail is None and isinstance(data, dict):
+            detail = data  # gal atsakymas jau be israsymo "item" rakto
+        if DEBUG and not _debug_detail_printed:
+            print(f"  [DEBUG] pilnas skelbimo {item_id} detaliu atsakymas:")
+            print(" ", json.dumps(data, ensure_ascii=False)[:3000])
+            _debug_detail_printed = True
+        return detail
+    except Exception as e:
+        if DEBUG:
+            print(f"  [DEBUG] nepavyko gauti skelbimo {item_id} detaliu: {e}")
+        return None
 
 
 def get_price(item):
@@ -302,9 +339,20 @@ def main():
                 continue
 
             title = item.get("title", "?")
-            description = item.get("description") or ""
 
-            country = get_country_code(item)
+            # Katalogo API nera aprasymo, tad kandidatams (jau praejusiems
+            # kainos filtra) uzklausiame skelbimo detales atskirai.
+            detail = fetch_item_details(item_id)
+            time.sleep(DETAIL_SLEEP_SECONDS)
+            if detail:
+                title = detail.get("title", title)
+                description = detail.get("description") or ""
+                country_source = detail
+            else:
+                description = item.get("description") or ""
+                country_source = item
+
+            country = get_country_code(country_source)
             country_ok = (country in ALLOWED_COUNTRY_CODES) if country else (not REQUIRE_KNOWN_COUNTRY)
             if not country_ok:
                 excluded_by_country += 1
