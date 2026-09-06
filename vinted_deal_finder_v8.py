@@ -42,6 +42,11 @@ EXCLUDE_COUNTRY_CODES = ["PL"]
 # Skelbimai be jokiu aiskiu kalbos pozymiu (pvz. vien "iPhone 13 Pro 128GB")
 # PRALEIDZIAMI (nes negalima patikimai nustatyti kalbos vien is modelio pavadinimo).
 ONLY_LITHUANIAN_TEXT = True
+
+# Palieka tik skelbimus, kuriu kaina (sveiku euru dalis) baigiasi vienu is siu
+# skaitmenu. Pvz. {0, 5, 9} praleis 250, 255, 259, 260, 265... bet ne 251, 262 ir t.t.
+# Jei nenori sio filtro - palik tuscia aibe: set()
+PRICE_LAST_DIGITS = {0, 5, 9}
 # ===================================================
 
 BASE = "https://www.vinted.lt"
@@ -228,6 +233,7 @@ def main():
         fresh = 0
         excluded_by_country = 0
         excluded_foreign = 0
+        excluded_price_digit = 0
 
         for item in items:
             item_id = item.get("id")
@@ -237,6 +243,10 @@ def main():
 
             price = get_price(item)
             if price is None or not (model["min_price"] <= price <= model["max_price"]):
+                continue
+
+            if PRICE_LAST_DIGITS and int(price) % 10 not in PRICE_LAST_DIGITS:
+                excluded_price_digit += 1
                 continue
 
             country = get_country_code(item)
@@ -260,7 +270,7 @@ def main():
             alerts.append((q, title, price, full_url))
             fresh += 1
 
-        print(f"  Gauta: {len(items)}, tinkama: {fresh}, atmesta salis: {excluded_by_country}, atmesta uzsienio kalba: {excluded_foreign}")
+        print(f"  Gauta: {len(items)}, tinkama: {fresh}, atmesta salis: {excluded_by_country}, atmesta uzsienio kalba: {excluded_foreign}, atmesta kainos skaitmuo: {excluded_price_digit}")
         time.sleep(SLEEP_SECONDS)
 
     save_seen(new_seen)
