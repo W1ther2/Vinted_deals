@@ -38,7 +38,7 @@ DRY_RUN = False # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau ma
                # Pirmam paleidimui palik True, antram - pakeisk i False.
 
 # Saliu kodai, kuriu skelimu NENORI (pvz. "PL" = Lenkija).
-ALLOWED_COUNTRY_CODES = ["LT"]
+EXCLUDE_COUNTRY_CODES = ["PL"]
 
 # Jei True - atmeta skelbimus, kuriu tekste (pavadinimas/aprasymas) lenkiska kalba.
 FILTER_POLISH_TEXT = True
