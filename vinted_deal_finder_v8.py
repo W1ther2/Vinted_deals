@@ -82,8 +82,16 @@ def init_session():
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, "r", encoding="utf-8") as f:
-            return set(json.load(f))
+        try:
+            with open(SEEN_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if not content:
+                print(f"! {SEEN_FILE} tuscias, pradedama nuo tuscio saraso.")
+                return set()
+            return set(json.loads(content))
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"! {SEEN_FILE} sugadintas ({e}), pradedama nuo tuscio saraso.")
+            return set()
     return set()
 
 
