@@ -22,14 +22,20 @@ jobs:
 
       - name: Paleisti tikrinima
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python vinted_deal_finder_v8.py
+          BOT_TOKEN: ${{ 8841585835:AAFPdurK8vDhd6FTK53wqF8HnYt7Uou1kXA }}
+          CHAT_ID: ${{ 6157710734 }}
+        run: |
+          ls -la
+          python vinted_deal_finder_v8.py
 
       - name: Issaugoti seen.json
         run: |
           git config user.name "vinted-bot"
           git config user.email "vinted-bot@users.noreply.github.com"
-          git add seen.json
-          git commit -m "update seen" || true
-          git push || true
+          if [ -f seen.json ]; then
+            git add seen.json
+            git commit -m "update seen" || true
+            git push || true
+          else
+            echo "seen.json nesukurtas - skriptas turbut nebaige darbo"
+          fi
