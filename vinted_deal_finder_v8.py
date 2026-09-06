@@ -31,7 +31,7 @@ PAGES = 3
 SLEEP_SECONDS = 3
 SEEN_FILE = "seen.json"
 DEBUG = True   # Jei True - parodys pirmu skelbimu kainu struktura diagnostikai
-DRY_RUN = True # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau matei.
+DRY_RUN = False # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau matei.
                # Pirmam paleidimui palik True, antram - pakeisk i False.
 
 # Kuriu saliu pardavejus LEISTI (pagal profilio nuorodos domena, pvz. vinted.lt -> "LT").
