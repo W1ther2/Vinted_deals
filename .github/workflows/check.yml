@@ -22,8 +22,8 @@ jobs:
 
       - name: Paleisti tikrinima
         env:
-          BOT_TOKEN: ${{ 8841585835:AAFPdurK8vDhd6FTK53wqF8HnYt7Uou1kXA }}
-          CHAT_ID: ${{ 6157710734 }}
+          BOT_TOKEN: ${{ botas }}
+          CHAT_ID: ${{ tel }}
         run: |
           ls -la
           python vinted_deal_finder_v8.py
