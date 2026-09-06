@@ -38,7 +38,7 @@ DRY_RUN = False # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau ma
                # Pirmam paleidimui palik True, antram - pakeisk i False.
 
 # Saliu kodai, kuriu skelimu NENORI (pvz. "PL" = Lenkija).
-EXCLUDE_COUNTRY_CODES = ["PL"]
+ALLOWED_COUNTRY_CODES = ["LT"]
 
 # Jei True - atmeta skelbimus, kuriu tekste (pavadinimas/aprasymas) lenkiska kalba.
 FILTER_POLISH_TEXT = True
@@ -208,7 +208,7 @@ def main():
                 continue
 
             country = get_country_code(item)
-            if country and country in EXCLUDE_COUNTRY_CODES:
+           if country and country not in ALLOWED_COUNTRY_CODES:
                 excluded_by_country += 1
                 continue
 
