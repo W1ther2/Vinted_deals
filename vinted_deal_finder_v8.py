@@ -10,8 +10,8 @@ import time
 
 # ========== SUSIKONFIGUROK SITAS EILUTES ==========
 import os
-BOT_TOKEN = os.environ.get("8841585835:AAFPdurK8vDhd6FTK53wqF8HnYt7Uou1kXA", "")
-CHAT_ID   = os.environ.get("6157710734", "")
+BOT_TOKEN = os.environ.get("BOT", "")
+CHAT_ID   = os.environ.get("TEL", "")
 
 MODELS = [
     {"query": "iPhone 13 Pro", "min_price": 250, "max_price": 420},
