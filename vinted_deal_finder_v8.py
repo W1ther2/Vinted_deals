@@ -18,6 +18,9 @@ CHAT_ID   = os.environ.get("CHAT_ID", "")
 
 MODELS = [
      {"query": "iPhone 13", "min_price": 100, "max_price": 180},
+     {"query": "iPhone 13 Pro", "min_price": 100, "max_price": 200},
+     {"query": "iPhone 14", "min_price": 100, "max_price": 180},
+     {"query": "iPhone 14 Pro", "min_price": 100, "max_price": 250},
 ]
 
 BLACKLIST_WORDS = [
