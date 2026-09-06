@@ -9,18 +9,15 @@ import os
 import time
 
 # ========== SUSIKONFIGUROK SITAS EILUTES ==========
-import os
+# BOT_TOKEN ir CHAT_ID imami is aplinkos kintamuju (GitHub Secrets).
+# Repo -> Settings -> Secrets and variables -> Actions -> sukurk BOT_TOKEN ir CHAT_ID.
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID   = os.environ.get("CHAT_ID", "")
 
 MODELS = [
-    {"query": "iPhone 12", "min_price": 50, "max_price": 100},
-    {"query": "iPhone 12 Pro", "min_price": 50, "max_price": 120},
-    {"query": "iPhone 13",     "min_price": 50, "max_price": 170},
-    {"query": "iPhone 13 Pro",     "min_price": 50, "max_price": 200},
-    {"query": "iPhone 14",     "min_price": 50, "max_price": 170},
-    {"query": "iPhone 14 Pro",     "min_price": 100, "max_price": 300},
-    {"query": "iPhone 15",     "min_price": 200, "max_price": 300},
+    {"query": "iPhone 13 Pro", "min_price": 250, "max_price": 420},
+    {"query": "iPhone 14 Pro", "min_price": 350, "max_price": 550},
+    {"query": "iPhone 15",     "min_price": 400, "max_price": 600},
 ]
 
 BLACKLIST_WORDS = [
@@ -40,8 +37,11 @@ DRY_RUN = False # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau ma
 # Saliu kodai, kuriu skelimu NENORI (pvz. "PL" = Lenkija).
 EXCLUDE_COUNTRY_CODES = ["PL"]
 
-# Jei True - atmeta skelbimus, kuriu tekste (pavadinimas/aprasymas) lenkiska kalba.
-FILTER_POLISH_TEXT = True
+# Jei True - palieka tik skelbimus, kuriu tekstas (pavadinimas/aprasymas) atrodo
+# lietuviskas. Atmeta lenkiska, latviska, rusiska (kirilica) ar angliska kalba.
+# Skelbimai be jokiu aiskiu kalbos pozymiu (pvz. vien "iPhone 13 Pro 128GB")
+# PRALEIDZIAMI (nes negalima patikimai nustatyti kalbos vien is modelio pavadinimo).
+ONLY_LITHUANIAN_TEXT = True
 # ===================================================
 
 BASE = "https://www.vinted.lt"
@@ -140,25 +140,57 @@ def get_country_code(item):
     return domain.upper()
 
 
+# --- Kalbos aptikimas -------------------------------------------------
+# Tikslas: praleisti tik lietuviskus (arba kalbos pozymiu neturincius)
+# skelbimus, atmesti aiskiai uzsienietiskus.
+
 # Raidziu, kuriu nera lietuviu kalboje (beveik visada = lenkiska kalba)
 POLISH_ONLY_CHARS = set("łńśźżć")
-
-# Dazni lenkiski zodziai skelbimuose
 POLISH_WORDS = [
     "sprzedam", "kupie", "telefon", "oryginalny", "stan", "wysylka",
     "zestaw", "paragon", "faktura", "nieuszkodzony", "ladny",
     "przesylka", "polecam", "okazja", "komplet", "uszkodzony",
 ]
 
+# Raidziu, kuriu nera lietuviu kalboje, bet yra latviu
+LATVIAN_ONLY_CHARS = set("āēīōūļņģ")
 
-def is_polish_text(*texts):
-    """True jei tekstas (pavadinimas/aprasymas) rasytas lenkiskai."""
+# Dazni angliski zodziai/frazes skelbimuose
+ENGLISH_WORDS = [
+    "selling", "brand new", "like new", "shipping", "great condition",
+    "excellent condition", "as new", "no issues", "works perfectly",
+]
+
+
+def _has_cyrillic(text):
+    return any("\u0400" <= ch <= "\u04ff" for ch in text)
+
+
+def detect_foreign_language(*texts):
+    """Grazina 'PL' / 'LV' / 'RU' / 'EN' jei tekstas atrodo parasytas ne
+    lietuviskai, arba None jei atrodo lietuviskas arba kalbos nustatyti
+    negalima (per mazai teksto / vien modelio pavadinimas)."""
     t = " ".join(x for x in texts if x).lower()
     if not t:
-        return False
-    char_hits = sum(1 for ch in t if ch in POLISH_ONLY_CHARS)
-    word_hits = sum(1 for w in POLISH_WORDS if w in t)
-    return char_hits >= 2 or (char_hits >= 1 and word_hits >= 1)
+        return None
+
+    if _has_cyrillic(t):
+        return "RU"
+
+    pl_chars = sum(1 for ch in t if ch in POLISH_ONLY_CHARS)
+    pl_words = sum(1 for w in POLISH_WORDS if w in t)
+    if pl_chars >= 2 or (pl_chars >= 1 and pl_words >= 1) or pl_words >= 2:
+        return "PL"
+
+    lv_chars = sum(1 for ch in t if ch in LATVIAN_ONLY_CHARS)
+    if lv_chars >= 2:
+        return "LV"
+
+    en_words = sum(1 for w in ENGLISH_WORDS if w in t)
+    if en_words >= 2:
+        return "EN"
+
+    return None
 
 
 def is_junk(title):
@@ -195,7 +227,7 @@ def main():
         items = fetch_items(q, PAGES)
         fresh = 0
         excluded_by_country = 0
-        excluded_polish = 0
+        excluded_foreign = 0
 
         for item in items:
             item_id = item.get("id")
@@ -214,9 +246,11 @@ def main():
 
             title = item.get("title", "?")
             description = item.get("description") or ""
-            if FILTER_POLISH_TEXT and is_polish_text(title, description):
-                excluded_polish += 1
-                continue
+            if ONLY_LITHUANIAN_TEXT:
+                lang = detect_foreign_language(title, description)
+                if lang:
+                    excluded_foreign += 1
+                    continue
 
             if is_junk(title):
                 continue
@@ -226,7 +260,7 @@ def main():
             alerts.append((q, title, price, full_url))
             fresh += 1
 
-        print(f"  Gauta: {len(items)}, tinkama: {fresh}, atmesta salis: {excluded_by_country}, atmesta lenk. tekstas: {excluded_polish}")
+        print(f"  Gauta: {len(items)}, tinkama: {fresh}, atmesta salis: {excluded_by_country}, atmesta uzsienio kalba: {excluded_foreign}")
         time.sleep(SLEEP_SECONDS)
 
     save_seen(new_seen)
