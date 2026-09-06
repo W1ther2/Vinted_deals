@@ -15,7 +15,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID   = os.environ.get("CHAT_ID", "")
 
 MODELS = [
-    {"query": "iPhone 13 Pro", "min_price": 150, "max_price": 420},
+    {"query": "iPhone 13 Pro", "min_price": 250, "max_price": 420},
     {"query": "iPhone 14 Pro", "min_price": 350, "max_price": 550},
     {"query": "iPhone 15",     "min_price": 400, "max_price": 600},
 ]
@@ -30,7 +30,7 @@ BLACKLIST_WORDS = [
 PAGES = 3
 SLEEP_SECONDS = 3
 SEEN_FILE = "seen.json"
-DEBUG = True   # Jei True - parodys pirmu skelbimu kainu struktura diagnostikai
+DEBUG = False   # Jei True - parodys pirmu skelbimu kainu struktura diagnostikai
 DRY_RUN = False # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau matei.
                # Pirmam paleidimui palik True, antram - pakeisk i False.
 
@@ -52,7 +52,7 @@ ONLY_LITHUANIAN_TEXT = True
 # Palieka tik skelbimus, kuriu kaina (sveiku euru dalis) baigiasi vienu is siu
 # skaitmenu. Pvz. {0, 5, 9} praleis 250, 255, 259, 260, 265... bet ne 251, 262 ir t.t.
 # Jei nenori sio filtro - palik tuscia aibe: set()
-PRICE_LAST_DIGITS = {}
+PRICE_LAST_DIGITS = {0, 5, 9}
 # ===================================================
 
 BASE = "https://www.vinted.lt"
@@ -138,9 +138,21 @@ def get_price(item):
 def get_country_code(item):
     """Grazina pardavejo salies koda is profilio URL domeno.
     Pvz. https://www.vinted.pl/member/... -> "PL",  vinted.fr -> "FR",
-    vinted.co.uk -> "UK". Jei nepavyksta - None."""
+    vinted.co.uk -> "UK". Jei nepavyksta - None.
+
+    DEMESIO: si euristika gali neveikti, jei API visada grazina profile_url
+    su tuo paciu domenu, per kuri siunciama uzklausa (t.y. visada vinted.lt),
+    nepriklausomai nuo tikros pardavejo salies. Jei DEBUG=True, pirmam
+    skelbimui bus atspausdintas visas 'user' objektas - patikrink, ar jame
+    yra kitas laukas (pvz. country_id / country_title), kuri reiketu naudoti
+    vietoj profile_url domeno."""
+    global _debug_user_printed
     import re
     user = item.get("user") or {}
+    if DEBUG and not _debug_user_printed:
+        print("  [DEBUG] pilnas 'user' objektas (ieskok salies lauko):")
+        print(" ", json.dumps(user, ensure_ascii=False))
+        _debug_user_printed = True
     url = user.get("profile_url") or ""
     m = re.search(r"vinted\.([a-z.]+)/", url)
     if not m:
@@ -155,13 +167,26 @@ def get_country_code(item):
 # Tikslas: praleisti tik lietuviskus (arba kalbos pozymiu neturincius)
 # skelbimus, atmesti aiskiai uzsienietiskus.
 
+import re as _re
+
+
+def _word_regex(words):
+    """Sudaro viena regex su \\b riboms is zodziu/fraziu sarasa (case jau lower)."""
+    parts = sorted((_re.escape(w) for w in words), key=len, reverse=True)
+    return _re.compile(r"\b(?:" + "|".join(parts) + r")\b")
+
+
 # Raidziu, kuriu nera lietuviu kalboje (beveik visada = lenkiska kalba)
 POLISH_ONLY_CHARS = set("łńśźżć")
 POLISH_WORDS = [
-    "sprzedam", "kupie", "telefon", "oryginalny", "stan", "wysylka",
-    "zestaw", "paragon", "faktura", "nieuszkodzony", "ladny",
-    "przesylka", "polecam", "okazja", "komplet", "uszkodzony",
+    "sprzedam", "sprzedaje", "kupie", "telefon", "oryginalny", "oryginalne",
+    "stan", "stanie", "wysylka", "wysylke", "zestaw", "paragon", "faktura",
+    "nieuszkodzony", "uszkodzony", "ladny", "przesylka", "polecam", "okazja",
+    "komplet", "kondycja", "sprawny", "sprawna", "pudelko", "gwarancja",
+    "cena", "pekniety", "peknieta", "zbite", "zbita", "wyswietlacz",
+    "bateria", "akumulator", "dziala", "pilne", "negocjacje", "akcesoria",
 ]
+_POLISH_RE = _word_regex(POLISH_WORDS)
 
 # Raidziu, kuriu nera lietuviu kalboje, bet yra latviu
 LATVIAN_ONLY_CHARS = set("āēīōūļņģ")
@@ -172,12 +197,14 @@ GERMAN_WORDS = [
     "verkaufe", "neuwertig", "versand", "zustand", "gebraucht",
     "originalverpackung", "rechnung", "funktioniert", "einwandfrei",
 ]
+_GERMAN_RE = _word_regex(GERMAN_WORDS)
 
 # Dazni angliski zodziai/frazes skelbimuose
 ENGLISH_WORDS = [
     "selling", "brand new", "like new", "shipping", "great condition",
     "excellent condition", "as new", "no issues", "works perfectly",
 ]
+_ENGLISH_RE = _word_regex(ENGLISH_WORDS)
 
 
 def _has_cyrillic(text):
@@ -187,7 +214,11 @@ def _has_cyrillic(text):
 def detect_foreign_language(*texts):
     """Grazina 'PL' / 'LV' / 'DE' / 'RU' / 'EN' jei tekstas atrodo parasytas ne
     lietuviskai, arba None jei atrodo lietuviskas arba kalbos nustatyti
-    negalima (per mazai teksto / vien modelio pavadinimas)."""
+    negalima (per mazai teksto / vien modelio pavadinimas).
+
+    Sie zodziu sarasai sudaryti is zodziu, kuriu praktiskai nepasitaiko
+    lietuviu kalboje, tad UZTENKA VIENO atitikimo (naudojant \\b zodzio
+    ribas, kad neuzkabintu dalies kito zodzio)."""
     t = " ".join(x for x in texts if x).lower()
     if not t:
         return None
@@ -195,22 +226,16 @@ def detect_foreign_language(*texts):
     if _has_cyrillic(t):
         return "RU"
 
-    pl_chars = sum(1 for ch in t if ch in POLISH_ONLY_CHARS)
-    pl_words = sum(1 for w in POLISH_WORDS if w in t)
-    if pl_chars >= 2 or (pl_chars >= 1 and pl_words >= 1) or pl_words >= 2:
+    if (sum(1 for ch in t if ch in POLISH_ONLY_CHARS) >= 1) or _POLISH_RE.search(t):
         return "PL"
 
-    de_chars = sum(1 for ch in t if ch in GERMAN_ONLY_CHARS)
-    de_words = sum(1 for w in GERMAN_WORDS if w in t)
-    if de_chars >= 2 or (de_chars >= 1 and de_words >= 1) or de_words >= 2:
+    if (sum(1 for ch in t if ch in GERMAN_ONLY_CHARS) >= 1) or _GERMAN_RE.search(t):
         return "DE"
 
-    lv_chars = sum(1 for ch in t if ch in LATVIAN_ONLY_CHARS)
-    if lv_chars >= 2:
+    if sum(1 for ch in t if ch in LATVIAN_ONLY_CHARS) >= 1:
         return "LV"
 
-    en_words = sum(1 for w in ENGLISH_WORDS if w in t)
-    if en_words >= 2:
+    if _ENGLISH_RE.search(t):
         return "EN"
 
     return None
@@ -320,4 +345,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
