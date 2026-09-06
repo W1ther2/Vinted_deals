@@ -207,8 +207,8 @@ def main():
             if price is None or not (model["min_price"] <= price <= model["max_price"]):
                 continue
 
-           country = get_country_code(item)
-            if country and country not in ALLOWED_COUNTRY_CODES:
+            country = get_country_code(item)
+            if country and country in EXCLUDE_COUNTRY_CODES:
                 excluded_by_country += 1
                 continue
 
