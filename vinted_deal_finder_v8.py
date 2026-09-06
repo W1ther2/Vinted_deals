@@ -15,7 +15,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID   = os.environ.get("CHAT_ID", "")
 
 MODELS = [
-    {"query": "iPhone 13 Pro", "min_price": 250, "max_price": 420},
+    {"query": "iPhone 13 Pro", "min_price": 150, "max_price": 420},
     {"query": "iPhone 14 Pro", "min_price": 350, "max_price": 550},
     {"query": "iPhone 15",     "min_price": 400, "max_price": 600},
 ]
@@ -30,15 +30,21 @@ BLACKLIST_WORDS = [
 PAGES = 3
 SLEEP_SECONDS = 3
 SEEN_FILE = "seen.json"
-DEBUG = False   # Jei True - parodys pirmu skelbimu kainu struktura diagnostikai
+DEBUG = True   # Jei True - parodys pirmu skelbimu kainu struktura diagnostikai
 DRY_RUN = False # Jei True - NESIUNCIA zinuciu i Telegram, tik issaugo ka jau matei.
                # Pirmam paleidimui palik True, antram - pakeisk i False.
 
-# Saliu kodai, kuriu skelimu NENORI (pvz. "PL" = Lenkija).
-EXCLUDE_COUNTRY_CODES = ["PL"]
+# Kuriu saliu pardavejus LEISTI (pagal profilio nuorodos domena, pvz. vinted.lt -> "LT").
+# Jei nori leisti ir daugiau saliu, pridek koda, pvz. ["LT", "LV"].
+ALLOWED_COUNTRY_CODES = ["LT"]
+
+# Jei True - taip pat atmeta skelbimus, kuriu salies nepavyksta nustatyti is profilio
+# nuorodos (saugiau, bet gali atmesti ir tikrus lietuviskus skelbimus, jei API tiesiog
+# negrazina profile_url). Jei nesi tikras - palik False ir stebek DEBUG isvesti.
+REQUIRE_KNOWN_COUNTRY = False
 
 # Jei True - palieka tik skelbimus, kuriu tekstas (pavadinimas/aprasymas) atrodo
-# lietuviskas. Atmeta lenkiska, latviska, rusiska (kirilica) ar angliska kalba.
+# lietuviskas. Atmeta lenkiska, latviska, vokiska, rusiska (kirilica) ar angliska kalba.
 # Skelbimai be jokiu aiskiu kalbos pozymiu (pvz. vien "iPhone 13 Pro 128GB")
 # PRALEIDZIAMI (nes negalima patikimai nustatyti kalbos vien is modelio pavadinimo).
 ONLY_LITHUANIAN_TEXT = True
@@ -46,7 +52,7 @@ ONLY_LITHUANIAN_TEXT = True
 # Palieka tik skelbimus, kuriu kaina (sveiku euru dalis) baigiasi vienu is siu
 # skaitmenu. Pvz. {0, 5, 9} praleis 250, 255, 259, 260, 265... bet ne 251, 262 ir t.t.
 # Jei nenori sio filtro - palik tuscia aibe: set()
-PRICE_LAST_DIGITS = {0, 5, 9}
+PRICE_LAST_DIGITS = {}
 # ===================================================
 
 BASE = "https://www.vinted.lt"
@@ -160,6 +166,13 @@ POLISH_WORDS = [
 # Raidziu, kuriu nera lietuviu kalboje, bet yra latviu
 LATVIAN_ONLY_CHARS = set("āēīōūļņģ")
 
+# Vokiskos raides ir dazni zodziai
+GERMAN_ONLY_CHARS = set("äöüß")
+GERMAN_WORDS = [
+    "verkaufe", "neuwertig", "versand", "zustand", "gebraucht",
+    "originalverpackung", "rechnung", "funktioniert", "einwandfrei",
+]
+
 # Dazni angliski zodziai/frazes skelbimuose
 ENGLISH_WORDS = [
     "selling", "brand new", "like new", "shipping", "great condition",
@@ -172,7 +185,7 @@ def _has_cyrillic(text):
 
 
 def detect_foreign_language(*texts):
-    """Grazina 'PL' / 'LV' / 'RU' / 'EN' jei tekstas atrodo parasytas ne
+    """Grazina 'PL' / 'LV' / 'DE' / 'RU' / 'EN' jei tekstas atrodo parasytas ne
     lietuviskai, arba None jei atrodo lietuviskas arba kalbos nustatyti
     negalima (per mazai teksto / vien modelio pavadinimas)."""
     t = " ".join(x for x in texts if x).lower()
@@ -186,6 +199,11 @@ def detect_foreign_language(*texts):
     pl_words = sum(1 for w in POLISH_WORDS if w in t)
     if pl_chars >= 2 or (pl_chars >= 1 and pl_words >= 1) or pl_words >= 2:
         return "PL"
+
+    de_chars = sum(1 for ch in t if ch in GERMAN_ONLY_CHARS)
+    de_words = sum(1 for w in GERMAN_WORDS if w in t)
+    if de_chars >= 2 or (de_chars >= 1 and de_words >= 1) or de_words >= 2:
+        return "DE"
 
     lv_chars = sum(1 for ch in t if ch in LATVIAN_ONLY_CHARS)
     if lv_chars >= 2:
@@ -249,17 +267,23 @@ def main():
                 excluded_price_digit += 1
                 continue
 
-            country = get_country_code(item)
-            if country and country in EXCLUDE_COUNTRY_CODES:
-                excluded_by_country += 1
-                continue
-
             title = item.get("title", "?")
             description = item.get("description") or ""
+
+            country = get_country_code(item)
+            country_ok = (country in ALLOWED_COUNTRY_CODES) if country else (not REQUIRE_KNOWN_COUNTRY)
+            if not country_ok:
+                excluded_by_country += 1
+                if DEBUG:
+                    print(f"  [DEBUG] atmesta (salis={country}): {title[:60]}")
+                continue
+
             if ONLY_LITHUANIAN_TEXT:
                 lang = detect_foreign_language(title, description)
                 if lang:
                     excluded_foreign += 1
+                    if DEBUG:
+                        print(f"  [DEBUG] atmesta (kalba={lang}, salis={country}): {title[:60]}")
                     continue
 
             if is_junk(title):
@@ -269,6 +293,8 @@ def main():
             full_url = BASE + url if url.startswith("/") else url
             alerts.append((q, title, price, full_url))
             fresh += 1
+            if DEBUG:
+                print(f"  [DEBUG] PRIIMTA (salis={country}): {title[:60]}")
 
         print(f"  Gauta: {len(items)}, tinkama: {fresh}, atmesta salis: {excluded_by_country}, atmesta uzsienio kalba: {excluded_foreign}, atmesta kainos skaitmuo: {excluded_price_digit}")
         time.sleep(SLEEP_SECONDS)
@@ -294,3 +320,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
