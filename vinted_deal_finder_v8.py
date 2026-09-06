@@ -7,6 +7,8 @@ import requests
 import json
 import os
 import time
+import re
+import html
 
 # ========== SUSIKONFIGUROK SITAS EILUTES ==========
 # BOT_TOKEN ir CHAT_ID imami is aplinkos kintamuju (GitHub Secrets).
@@ -15,11 +17,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID   = os.environ.get("CHAT_ID", "")
 
 MODELS = [
-    {"query": "iPhone 13", "min_price": 100, "max_price": 180},
-    {"query": "iPhone 13 Pro", "min_price": 100, "max_price": 200},
-    {"query": "iPhone 14", "min_price": 100, "max_price": 190},
-    {"query": "iPhone 14 Pro", "min_price": 100, "max_price": 300},
-    {"query": "iPhone 15",     "min_price": 100, "max_price": 300},
+     {"query": "iPhone 13", "min_price": 100, "max_price": 180},
 ]
 
 BLACKLIST_WORDS = [
@@ -123,42 +121,73 @@ def fetch_items(query, pages):
     return items
 
 
-_debug_detail_printed = False
+_debug_og_printed = False
 DETAIL_SLEEP_SECONDS = 1.0
 
+_META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_PROPERTY_RE = re.compile(r'property=["\']([^"\']+)["\']', re.IGNORECASE)
+_CONTENT_RE = re.compile(r'content=["\']([^"\']*)["\']', re.IGNORECASE)
 
-def fetch_item_details(item_id):
-    """Katalogo/paieskos API skelbimo objekte NERA aprasymo (description visada
-    tuscias) - tai patvirtino DEBUG isvestis. Todel kandidatams, praejusiems
-    kainos filtra, papildomai uzklausiame atskiro skelbimo endpoint'o, kuriame
-    turetu buti pilnas aprasymas (ir galbut patikimesni pardavejo duomenys).
 
-    DEMESIO: sio endpoint'o tiksli forma spejama pagal iprasta Vinted API
-    struktura, nes neturiu galimybes pats jos patikrinti tiesiogiai. Jei
-    DEBUG=True, pirmam issikvietimui bus atspausdintas visas atsakymas - jei
-    endpoint'as neteisingas (pvz. gaunamas 404 ar kitokia JSON strauktura),
-    tai bus matoma is karto ir galesime endpoint'a pataisyti kartu."""
-    global _debug_detail_printed
-    url = f"{BASE}/api/v2/items/{item_id}"
+def _parse_og_tags(html_text):
+    """Israsko visas 'og:*' meta zymas is HTML teksto, nepriklausomai nuo
+    property/content atributu tvarkos tage."""
+    og = {}
+    for tag in _META_TAG_RE.findall(html_text):
+        pm = _PROPERTY_RE.search(tag)
+        if not pm or not pm.group(1).startswith("og:"):
+            continue
+        cm = _CONTENT_RE.search(tag)
+        if not cm:
+            continue
+        key = pm.group(1)[3:]  # nuimam "og:" prefiksa
+        og[key] = html.unescape(cm.group(1))
+    return og
+
+
+def fetch_item_page_og(item_id, url_path, max_bytes=200_000):
+    """Katalogo/paieskos API skelbimo objekte NERA aprasymo, o atskiras JSON
+    endpoint'as (/api/v2/items/{id}) Vinted DAZNIAUSIAI BLOKUOJA (403, anti-bot
+    apsauga - tai patvirtinta ir populiariuose atviro kodo Vinted scraper'iuose).
+
+    Todel aprasyma skaitome is vieso skelbimo puslapio OpenGraph <meta> zymu
+    (title/description/image/url), kurios visada yra HTML <head> dalyje - siam
+    keliui pakanka atsiusti tik pirmus kelis desimtis KB puslapio, o ne visa
+    JSON API atsakyma, tad jis maziau panasus i "bot" elgesi.
+
+    DEMESIO: jei og:description formatas skiriasi nuo tiketo (pvz. Vinted
+    kartais dubliuoja kaina ar kt. teksta prieky), DEBUG isvestis parodys
+    tiksliai, ka gavome - pagal tai galesim koreguoti."""
+    global _debug_og_printed
+    full_url = BASE + url_path if url_path.startswith("/") else url_path
     try:
-        resp = session.get(url, headers=HEADERS, timeout=20)
+        resp = session.get(full_url, headers=HEADERS, timeout=20, stream=True)
         if resp.status_code != 200:
             if DEBUG:
-                print(f"  [DEBUG] skelbimo {item_id} detaliu uzklausa: HTTP {resp.status_code}")
-            return None
-        data = resp.json()
-        detail = data.get("item") if isinstance(data, dict) else None
-        if detail is None and isinstance(data, dict):
-            detail = data  # gal atsakymas jau be israsymo "item" rakto
-        if DEBUG and not _debug_detail_printed:
-            print(f"  [DEBUG] pilnas skelbimo {item_id} detaliu atsakymas:")
-            print(" ", json.dumps(data, ensure_ascii=False)[:3000])
-            _debug_detail_printed = True
-        return detail
+                print(f"  [DEBUG] skelbimo puslapio {item_id} uzklausa: HTTP {resp.status_code}")
+            resp.close()
+            return {}
+        chunks = []
+        total = 0
+        for chunk in resp.iter_content(chunk_size=8192):
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= max_bytes:
+                break
+        resp.close()
+        html_text = b"".join(chunks).decode("utf-8", errors="ignore")
+        og = _parse_og_tags(html_text)
+        if DEBUG and not _debug_og_printed:
+            print(f"  [DEBUG] skelbimo {item_id} OG duomenys (is puslapio <head>):")
+            print(" ", json.dumps(og, ensure_ascii=False))
+            _debug_og_printed = True
+        return og
     except Exception as e:
         if DEBUG:
-            print(f"  [DEBUG] nepavyko gauti skelbimo {item_id} detaliu: {e}")
-        return None
+            print(f"  [DEBUG] nepavyko gauti skelbimo {item_id} puslapio: {e}")
+        return {}
 
 
 def get_price(item):
@@ -195,7 +224,6 @@ def get_country_code(item):
     yra kitas laukas (pvz. country_id / country_title), kuri reiketu naudoti
     vietoj profile_url domeno."""
     global _debug_user_printed
-    import re
     user = item.get("user") or {}
     if DEBUG and not _debug_user_printed:
         print("  [DEBUG] pilnas 'user' objektas (ieskok salies lauko):")
@@ -341,20 +369,21 @@ def main():
                 continue
 
             title = item.get("title", "?")
+            url_path = item.get("url") or ""
+            full_url = BASE + url_path if url_path.startswith("/") else url_path
 
-            # Katalogo API nera aprasymo, tad kandidatams (jau praejusiems
-            # kainos filtra) uzklausiame skelbimo detales atskirai.
-            detail = fetch_item_details(item_id)
+            # Katalogo API nera aprasymo, o JSON detaliu endpoint'as Vinted
+            # dazniausiai blokuoja (403). Todel aprasyma skaitome is vieso
+            # skelbimo puslapio OpenGraph zymu.
+            og = fetch_item_page_og(item_id, url_path)
             time.sleep(DETAIL_SLEEP_SECONDS)
-            if detail:
-                title = detail.get("title", title)
-                description = detail.get("description") or ""
-                country_source = detail
-            else:
-                description = item.get("description") or ""
-                country_source = item
+            if og.get("title"):
+                title = og["title"]
+            description = og.get("description") or ""
 
-            country = get_country_code(country_source)
+            # OG zymos salies neduoda, tad sita liekam prie kataloginio
+            # (nors, kaip aptikta, jis, atrodo, visada rodo LT).
+            country = get_country_code(item)
             country_ok = (country in ALLOWED_COUNTRY_CODES) if country else (not REQUIRE_KNOWN_COUNTRY)
             if not country_ok:
                 excluded_by_country += 1
@@ -373,8 +402,6 @@ def main():
             if is_junk(title):
                 continue
 
-            url = item.get("url") or ""
-            full_url = BASE + url if url.startswith("/") else url
             alerts.append((q, title, price, full_url))
             fresh += 1
             if DEBUG:
