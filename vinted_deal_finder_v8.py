@@ -15,9 +15,11 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID   = os.environ.get("CHAT_ID", "")
 
 MODELS = [
-    {"query": "iPhone 13 Pro", "min_price": 250, "max_price": 420},
-    {"query": "iPhone 14 Pro", "min_price": 350, "max_price": 550},
-    {"query": "iPhone 15",     "min_price": 400, "max_price": 600},
+    {"query": "iPhone 13", "min_price": 100, "max_price": 180},
+    {"query": "iPhone 13 Pro", "min_price": 100, "max_price": 200},
+    {"query": "iPhone 14", "min_price": 100, "max_price": 190},
+    {"query": "iPhone 14 Pro", "min_price": 100, "max_price": 300},
+    {"query": "iPhone 15",     "min_price": 100, "max_price": 300},
 ]
 
 BLACKLIST_WORDS = [
