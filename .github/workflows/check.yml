@@ -1,0 +1,35 @@
+name: Vinted checker
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # kas 15 minuciu
+  workflow_dispatch:          # leidzia paleisti ranka mygtuku
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Idiegti biblioteka
+        run: pip install requests
+
+      - name: Paleisti tikrinima
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python vinted_deal_finder_v8.py
+
+      - name: Issaugoti seen.json
+        run: |
+          git config user.name "vinted-bot"
+          git config user.email "vinted-bot@users.noreply.github.com"
+          git add seen.json
+          git commit -m "update seen" || true
+          git push || true
