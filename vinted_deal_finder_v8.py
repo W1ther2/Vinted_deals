@@ -103,21 +103,57 @@ def save_seen(seen):
         json.dump(list(seen), f)
 
 
+def fetch_page_with_retry(query, page, max_retries=3):
+    """Uzklausia viena puslapi su pakartojimais:
+    - 401/403 -> atnaujina sesija ir bando dar karta (sesija galejo pasenti)
+    - 429     -> ilgesne pauze ir bando dar karta (rate limiting)
+    - 5xx / tinklo klaida -> backoff ir bando dar karta
+    Grazina items sarasa, tuscia sarasa (nebepuslapiuojam) arba None (viskas zlugo)."""
+    url = BASE + "/api/v2/catalog/items"
+    params = {"search_text": query, "per_page": 96, "page": page}
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = session.get(url, params=params, headers=HEADERS, timeout=20)
+            if resp.status_code in (401, 403):
+                print(f"  ! {resp.status_code} – atnaujinu sesija (bandymas {attempt}/{max_retries})...")
+                init_session()
+                time.sleep(SLEEP_SECONDS)
+                continue
+            if resp.status_code == 429:
+                wait = SLEEP_SECONDS * attempt * 2
+                print(f"  ! 429 per daug uzklausu – laukiu {wait}s...")
+                time.sleep(wait)
+                continue
+            if resp.status_code >= 500:
+                print(f"  ! Serverio klaida {resp.status_code} (bandymas {attempt}/{max_retries})")
+                time.sleep(SLEEP_SECONDS * attempt)
+                continue
+            if resp.status_code != 200:
+                print(f"  ! '{query}' p.{page}: HTTP {resp.status_code}: {resp.text[:200]}")
+                return None
+            data = resp.json()
+            if not isinstance(data, dict):
+                print(f"  ! '{query}' p.{page}: netiketas atsakymo formatas (ne JSON objektas)")
+                return None
+            batch = data.get("items") or []
+            if not isinstance(batch, list):
+                print(f"  ! '{query}' p.{page}: 'items' nera sarasas – API struktura galejo pasikeisti")
+                return None
+            return batch
+        except (requests.RequestException, ValueError) as e:
+            print(f"  ! Tinklo/JSON klaida (bandymas {attempt}/{max_retries}): {e}")
+            time.sleep(SLEEP_SECONDS * attempt)
+    print(f"  ! Visi {max_retries} bandymai nepavyko: '{query}' p.{page}")
+    return None
+
+
 def fetch_items(query, pages):
     items = []
     for page in range(1, pages + 1):
-        url = BASE + "/api/v2/catalog/items"
-        params = {"search_text": query, "per_page": 96, "page": page}
-        try:
-            resp = session.get(url, params=params, headers=HEADERS, timeout=20)
-            if resp.status_code != 200:
-                print(f"  ! '{query}' p.{page}: HTTP {resp.status_code}: {resp.text[:200]}")
-                break
-            batch = resp.json().get("items", [])
-        except Exception as e:
-            print(f"  ! Klaida siunciant '{query}' puslapi {page}: {e}")
+        batch = fetch_page_with_retry(query, page)
+        if batch is None:      # viskas zlugo – stabdome si modeli
             break
-        if not batch:
+        if not batch:          # daugiau nera – stabdome puslapiavima
             break
         items.extend(batch)
         time.sleep(SLEEP_SECONDS)
@@ -193,26 +229,52 @@ def fetch_item_page_og(item_id, url_path, max_bytes=200_000):
         return {}
 
 
+def _to_float(v):
+    """Saugiai vercia reiksme i float; None jei nepavyksta."""
+    if v is None:
+        return None
+    try:
+        return float(str(v).replace(",", ".").strip())
+    except (ValueError, TypeError):
+        return None
+
+
 def get_price(item):
-    """Supranta abu Vinted kainu formatus:
-    - {"amount": "299.0", "currency_code": "EUR"}  (naujas)
-    - "29900"  (sena, centais)"""
+    """Lankstus kainos nuskaitymas – bando kelis formatus ir laukus,
+    kad kintant API strukturai kuo ilgiau veiktu be taisymu:
+    - {"amount": "299.0"} (dict)
+    - "29900" (string centais)
+    - 29900 (int centais)
+    - atsarginiai laukai price_amount / amount / total_item_price"""
     global _debug_price_printed
     p = item.get("price")
     if DEBUG and not _debug_price_printed:
         print(f"  [DEBUG] price: {repr(p)}")
-        print(f"  [DEBUG] description yra: {'description' in item}, ilgis: {len(item.get('description') or '')}")
         _debug_price_printed = True
     if isinstance(p, dict):
-        try:
-            return float(p.get("amount", 0))
-        except (ValueError, TypeError):
-            return None
-    raw = str(p or "0")
-    try:
-        return int(raw) / 100.0
-    except ValueError:
+        for k in ("amount", "value", "price"):
+            f = _to_float(p.get(k))
+            if f is not None:
+                return f
+        for v in p.values():
+            f = _to_float(v)
+            if f is not None:
+                return f
         return None
+    if p is not None and str(p).strip() != "":
+        s = str(p).strip()
+        try:
+            return int(s) / 100.0          # senas formatas – centai
+        except ValueError:
+            f = _to_float(s)
+            if f is not None:
+                return f
+    for key in ("price_amount", "amount", "total_item_price", "numeric_price"):
+        if key in item:
+            f = _to_float(item[key])
+            if f is not None:
+                return f
+    return None
 
 
 def get_country_code(item):
@@ -347,18 +409,24 @@ def main():
     seen = load_seen()
     new_seen = set(seen)
     alerts = []
+    total_fetched = 0
 
     for model in MODELS:
         q = model["query"]
         print(f"Tikrinama: '{q}' ({model['min_price']}-{model['max_price']} EUR)...")
         items = fetch_items(q, PAGES)
+        total_fetched += len(items)
         fresh = 0
         excluded_by_country = 0
         excluded_foreign = 0
         excluded_price_digit = 0
 
         for item in items:
-            item_id = item.get("id")
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("id") or item.get("item_id") or item.get("entity_id")
+            if item_id is None:
+                continue
             if item_id in seen:
                 continue
             new_seen.add(item_id)
@@ -371,8 +439,8 @@ def main():
                 excluded_price_digit += 1
                 continue
 
-            title = item.get("title", "?")
-            url_path = item.get("url") or ""
+            title = item.get("title") or item.get("name") or "?"
+            url_path = item.get("url") or item.get("path") or item.get("web_url") or ""
             full_url = BASE + url_path if url_path.startswith("/") else url_path
 
             # Katalogo API nera aprasymo, o JSON detaliu endpoint'as Vinted
@@ -413,7 +481,16 @@ def main():
         print(f"  Gauta: {len(items)}, tinkama: {fresh}, atmesta salis: {excluded_by_country}, atmesta uzsienio kalba: {excluded_foreign}, atmesta kainos skaitmuo: {excluded_price_digit}")
         time.sleep(SLEEP_SECONDS)
 
+    # Rusiuojame visus alertus pagal kaina (nuo maziausios)
+    alerts.sort(key=lambda a: a[2])
+
     save_seen(new_seen)
+
+    # Savaime diagnostika: jei is VISU paiesku negauta nei vieno skelbimo,
+    # tai zenklas, kad Vinted galejo ka nors pakeisti – pranesame i Telegram.
+    if total_fetched == 0 and not DRY_RUN and BOT_TOKEN and CHAT_ID:
+        send_telegram("<b>ISPEJIMAS</b>: negauta nei vieno skelbimo is Vinted. "
+                      "Galimai pasikeite API – patikrink skripto logus.")
 
     if not alerts:
         print("Nauju deal'u nera.")
@@ -432,5 +509,20 @@ def main():
     print(f"Issiusta {len(alerts)} alert'u.")
 
 
+def run_with_guard():
+    """Visa programa apsupta apsauga: bet kokia netiketa klaida – pranesimas
+    i Telegram, kad Vinted pakeitus kazka nezaltum be zinios."""
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(tb)
+        try:
+            send_telegram("<b>SKRIPTAS UZLUSO</b>\n" + str(e)[:400])
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
-    main()
+    run_with_guard()
