@@ -589,7 +589,7 @@ def run_with_guard():
         tb = traceback.format_exc()
         print(tb)
         try:
-            send_telegram("<b>SKRIPTAS UZLUSO</b>\n" + str(e)[:400])
+            send_telegram("<b>SKRIPTAS UZLUZO</b>\n" + str(e)[:400])
         except Exception:
             pass
 
