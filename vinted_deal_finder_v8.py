@@ -37,7 +37,7 @@ DEFAULTS = {
     "ALLOWED_COUNTRY_CODES": ["LT"],
     "REQUIRE_KNOWN_COUNTRY": False,
     "ONLY_LITHUANIAN_TEXT": True,
-    "PRICE_LAST_DIGITS": [0, 5, 9],
+    "PRICE_LAST_DIGITS": [],
     "PAGES": 3,
     "SLEEP_SECONDS": 3,
     "DRY_RUN": False,
