@@ -1,0 +1,39 @@
+{
+  "MODELS": [
+    {
+      "query": "iPhone 13",
+      "min_price": 100,
+      "max_price": 160
+    },
+    {
+      "query": "iPhone 13 Pro",
+      "min_price": 100,
+      "max_price": 200
+    },
+    {
+      "query": "iPhone 14",
+      "min_price": 100,
+      "max_price": 200
+    },
+    {
+      "query": "iPhone 14 Pro",
+      "min_price": 100,
+      "max_price": 350
+    }
+  ],
+  "ALLOWED_COUNTRY_CODES": [
+    "LT"
+  ],
+  "ONLY_LITHUANIAN_TEXT": true,
+  "PRICE_LAST_DIGITS": [
+    0,
+    5,
+    9
+  ],
+  "PAGES": 3,
+  "SLEEP_SECONDS": 3,
+  "DRY_RUN": false,
+  "DEBUG": false,
+  "SEEN_MAX_AGE_DAYS": 7,
+  "SEEN_MAX_ENTRIES": 10000
+}
