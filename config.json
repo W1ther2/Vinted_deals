@@ -32,7 +32,7 @@
   ],
   "PAGES": 3,
   "SLEEP_SECONDS": 3,
-  "DRY_RUN": true,
+  "DRY_RUN": false,
   "DEBUG": false,
   "SEEN_MAX_AGE_DAYS": 7,
   "SEEN_MAX_ENTRIES": 10000
