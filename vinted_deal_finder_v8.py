@@ -476,10 +476,10 @@ def main():
     init_session()
 
     seen = load_seen()
-    new_seen = set(seen)
+    new_seen = dict(seen) # <-- IŠTAISYTA ČIA
     alerts = []
     total_fetched = 0
-
+    
     for model in MODELS:
         q = model["query"]
         print(f"Tikrinama: '{q}' ({model['min_price']}-{model['max_price']} EUR)...")
